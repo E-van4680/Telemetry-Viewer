@@ -52,6 +52,31 @@
       </div>
       <p id="chart-error" class="errores" hidden></p>
 
+      <details id="det-deriv" class="deriv">
+        <summary>Velocidad y aceleración (estimadas)</summary>
+        <div class="deriv-body">
+          <div class="aviso-deriv" role="note">
+            <p><strong>Son estimaciones</strong>, derivadas numéricamente de la altitud barométrica. Al derivar se amplifica el ruido
+              del sensor, y los picos rápidos (encendido del motor, eyección) quedan suavizados y algo atrasados por el filtro del
+              sensor (IIR del BMP280) y por la ventana de cálculo.</p>
+            <p>El error indicado es solo el <strong>aleatorio</strong> (estadístico, de 95 %, 2σ). Además existen errores
+              <strong>sistemáticos</strong> que no están incluidos: el sesgo por suavizado de la ventana en los cambios bruscos y el
+              retardo del filtro IIR del BMP280.</p>
+            <ul id="deriv-info" class="deriv-info"></ul>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="chk-bandas">
+            <span>Mostrar curvas máxima y mínima (±2σ, ~95&nbsp;%)</span>
+          </label>
+          <div class="chart-box chart-box-sm">
+            <canvas id="grafico-v" role="img" aria-label="Gráfico de velocidad vertical estimada en metros por segundo en función del tiempo en segundos"></canvas>
+          </div>
+          <div class="chart-box chart-box-sm">
+            <canvas id="grafico-a" role="img" aria-label="Gráfico de aceleración vertical estimada en metros por segundo al cuadrado en función del tiempo en segundos"></canvas>
+          </div>
+        </div>
+      </details>
+
       <h2 class="cards-title">Vuelos cargados</h2>
       <div id="cards" class="cards"></div>
     </section>

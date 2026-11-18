@@ -171,3 +171,16 @@ p.errores:not(:empty) { border-left: 5px solid var(--danger); background: var(--
 
 .elegir { text-align: center; margin: 12px 0 0; }
 .errores .aviso { border-left: 5px solid var(--accent); background: var(--surface); padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; box-shadow: var(--shadow); }
+
+/* Velocidad y aceleración */
+.deriv { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.deriv > summary { cursor: pointer; padding: 12px 16px; min-height: 44px; font-weight: 700; font-size: 1.1rem; }
+.deriv > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: var(--radius); }
+.deriv-body { padding: 0 12px 12px; }
+.aviso-deriv { border-left: 5px solid var(--accent); background: var(--surface-2); padding: 8px 14px; border-radius: 8px; font-size: .92rem; margin-bottom: 8px; }
+.aviso-deriv p { margin: 6px 0; }
+.deriv-info { margin: 6px 0; padding-left: 20px; }
+.deriv-info li { margin: 4px 0; overflow-wrap: anywhere; }
+.deriv-info .sw { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.chart-box-sm { height: clamp(220px, 38vh, 380px); margin-top: 10px; box-shadow: none; }
+@media (max-width: 520px) { .deriv-body .toggle { width: 100%; justify-content: flex-start; } }

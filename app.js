@@ -8,11 +8,12 @@
   var flights = [];      // {id, fileName, label, color, data}
   var selectedId = null;
   var nextId = 1;
-  var chart = null;
+  var chart = null, chartV = null, chartA = null;
 
   var $ = function (id) { return document.getElementById(id); };
   var dropzone = $('dropzone'), fileInput = $('file-input'), errores = $('errores');
   var panel = $('panel'), cardsEl = $('cards'), chkSuperponer = $('chk-superponer');
+  var detDeriv = $('det-deriv'), chkBandas = $('chk-bandas');
 
   /* ---------- utilidades ---------- */
   function el(tag, cls, text) {
@@ -166,7 +167,16 @@
     return ds;
   }
 
+  function rangoX(list) {
+    var lo = Infinity, hi = -Infinity;
+    list.forEach(function (f) {
+      lo = Math.min(lo, f.data.t[0]); hi = Math.max(hi, f.data.t[f.data.t.length - 1]);
+    });
+    return { min: lo, max: hi };
+  }
+
   function chartConfig(list, tema, fixedSize) {
+    var rx = rangoX(list);
     return {
       type: 'line',
       data: { datasets: buildDatasets(list) },
@@ -178,8 +188,9 @@
         interaction: { mode: 'nearest', axis: 'x', intersect: false },
         scales: {
           x: {
-            type: 'linear', title: { display: true, text: 'Tiempo (s)', color: tema.texto, font: { size: 14, weight: '600' } },
-            ticks: { color: tema.texto, font: { size: 13 } }, grid: { color: tema.grilla }
+            type: 'linear', min: rx.min, max: rx.max,
+            title: { display: true, text: 'Tiempo (s)', color: tema.texto, font: { size: 14, weight: '600' } },
+            ticks: { color: tema.texto, font: { size: 13 }, includeBounds: false }, grid: { color: tema.grilla }
           },
           y: {
             title: { display: true, text: 'Altitud (m)', color: tema.texto, font: { size: 14, weight: '600' } },
@@ -224,11 +235,126 @@
     err.hidden = true;
     if (chart) { chart.destroy(); chart = null; }
     var list = visibles();
+    if (list.length) chart = new Chart($('grafico'), chartConfig(list, temaPantalla(), false));
+    drawDeriv();
+  }
+
+  /* ---------- velocidad y aceleración (se crean solo con la sección abierta) ---------- */
+  function rgba(hex, a) {
+    var n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  function derivDatasets(list, key, ekey) {
+    var ds = [], bandas = chkBandas.checked;
+    list.forEach(function (f) {
+      var d = f.data, dv = d.deriv, main = [], up = [], lo = [];
+      for (var i = 0; i < d.t.length; i++) {
+        var y = dv[key][i];
+        if (y === null) continue;
+        var e = 2 * dv[ekey][i];
+        main.push({ x: d.t[i], y: y, e: e });
+        if (bandas) { up.push({ x: d.t[i], y: y + e, e: e }); lo.push({ x: d.t[i], y: y - e, e: e }); }
+      }
+      ds.push({
+        fid: f.id, label: nombre(f), data: main, borderColor: f.color, backgroundColor: f.color,
+        borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, tension: 0, parsing: false, order: 1
+      });
+      if (bandas) {
+        var base = { fid: f.id, esBanda: true, borderColor: rgba(f.color, 0.65), borderWidth: 1, borderDash: [3, 3],
+          pointRadius: 0, pointHoverRadius: 0, tension: 0, parsing: false, order: 2 };
+        ds.push(Object.assign({}, base, { data: up, label: nombre(f) + ' (+2σ)', fill: '+1', backgroundColor: rgba(f.color, 0.16) }));
+        ds.push(Object.assign({}, base, { data: lo, label: nombre(f) + ' (−2σ)', fill: false, backgroundColor: rgba(f.color, 0.16) }));
+      }
+    });
+    return ds;
+  }
+
+  function derivConfig(list, tema, key, ekey, ytitle, unit, rx) {
+    var axis = function (title) {
+      return { title: { display: true, text: title, color: tema.texto, font: { size: 14, weight: '600' } },
+        ticks: { color: tema.texto, font: { size: 13 } }, grid: { color: tema.grilla } };
+    };
+    var xs = axis('Tiempo (s)'); xs.type = 'linear'; xs.min = rx.min; xs.max = rx.max;
+    return {
+      type: 'line',
+      data: { datasets: derivDatasets(list, key, ekey) },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, normalized: true,
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        scales: { x: xs, y: axis(ytitle) },
+        plugins: {
+          legend: {
+            display: list.length > 1,
+            labels: { color: tema.texto, font: { size: 14 }, usePointStyle: true, boxWidth: 10,
+              filter: function (item, data) { return !data.datasets[item.datasetIndex].esBanda; } }
+          },
+          tooltip: {
+            filter: function (item) { return !item.dataset.esBanda; },
+            callbacks: {
+              title: function (items) { return 't = ' + fmt(items[0].parsed.x, 2, 's'); },
+              label: function (ctx) {
+                return ctx.dataset.label + ': ' + fmt(ctx.parsed.y, 1, unit) + ' ± ' + fmt(ctx.raw.e, 1) + ' (2σ)';
+              }
+            }
+          }
+        }
+      }
+    };
+  }
+
+  function mediana(arr) {
+    var v = arr.filter(function (x) { return x !== null && isFinite(x); }).sort(function (a, b) { return a - b; });
+    return v.length ? v[Math.floor(v.length / 2)] : null;
+  }
+
+  function ventanaTxt(k, d) {
+    var dt = [];
+    for (var i = 1; i < d.t.length; i++) dt.push(d.t[i] - d.t[i - 1]);
+    var m = mediana(dt);
+    return '±' + k + ' muestras' + (m ? ' (≈ ±' + fmt(k * m, 2, 's') + ')' : '');
+  }
+
+  function pm(m, unit) { return m === null ? '—' : '±' + fmt(2 * m, 2, unit); }
+
+  function drawInfo(list) {
+    var ul = $('deriv-info');
+    ul.textContent = '';
+    list.forEach(function (f) {
+      var dv = f.data.deriv;
+      var li = el('li');
+      var sw = el('span', 'sw'); sw.style.background = f.color; sw.setAttribute('aria-hidden', 'true');
+      li.appendChild(sw);
+      li.appendChild(el('strong', null, nombre(f) + ': '));
+      li.appendChild(document.createTextNode(
+        'σ de la altitud estimada = ' + fmt(dv.sigmaH, 2, 'm') + ' (' + dv.fuenteSigma + ') · ' +
+        'error de la velocidad ' + pm(mediana(dv.sv), 'm/s') + ' (2σ) · ' +
+        'error de la aceleración ' + pm(mediana(dv.sa), 'm/s²') + ' (2σ) · ' +
+        'ventanas: velocidad ' + ventanaTxt(dv.kv, f.data) + ', aceleración ' + ventanaTxt(dv.ka, f.data) + '. ' +
+        'Error calculado: ' + dv.fuenteError + '.' +
+        (dv.sigmaPiso ? ' Nota: σ de la altitud en el piso mínimo (0,05 m); el ruido real puede ser mayor.' : '')));
+      ul.appendChild(li);
+    });
+  }
+
+  function destroyDeriv() {
+    if (chartV) { chartV.destroy(); chartV = null; }
+    if (chartA) { chartA.destroy(); chartA = null; }
+  }
+
+  function drawDeriv() {
+    destroyDeriv();
+    if (!detDeriv.open || typeof Chart === 'undefined') return;
+    var list = visibles();
+    drawInfo(list);
     if (!list.length) return;
-    chart = new Chart($('grafico'), chartConfig(list, temaPantalla(), false));
+    var tema = temaPantalla(), rx = rangoX(list);
+    chartV = new Chart($('grafico-v'), derivConfig(list, tema, 'v', 'sv', 'Velocidad vertical (m/s)', 'm/s', rx));
+    chartA = new Chart($('grafico-a'), derivConfig(list, tema, 'a', 'sa', 'Aceleración vertical (m/s²)', 'm/s²', rx));
   }
 
   function updateChartLabels() {
+    updateDerivLabels();
     if (!chart) return;
     var list = visibles();
     chart.data.datasets.forEach(function (ds, i) {
@@ -236,6 +362,20 @@
       if (f) ds.label = i % 2 ? nombre(f) + ' (apogeo)' : nombre(f);
     });
     chart.update('none');
+  }
+
+  function updateDerivLabels() {
+    [chartV, chartA].forEach(function (c) {
+      if (!c) return;
+      c.data.datasets.forEach(function (ds) {
+        var f = flights.filter(function (x) { return x.id === ds.fid; })[0];
+        if (!f) return;
+        var suf = ds.esBanda ? (ds.label.indexOf('(+') >= 0 ? ' (+2σ)' : ' (−2σ)') : '';
+        ds.label = nombre(f) + suf;
+      });
+      c.update('none');
+    });
+    drawInfo(visibles());
   }
 
   /* ---------- tarjetas ---------- */
@@ -271,7 +411,10 @@
     var dl = el('dl', 'stats');
     dl.appendChild(statItem('Tiempo hasta el apogeo', fmt(s.tApogeo, 2, 's')));
     dl.appendChild(statItem('Duración del vuelo', fmt(s.duracion, 1, 's')));
-    dl.appendChild(statItem('Vel. máx. de ascenso', fmt(s.vAscMax, 1, 'm/s'), 'estimada'));
+    dl.appendChild(statItem('Vel. máx. de ascenso',
+      fmt(s.vAscMax, 1) + (s.vAscMaxErr === null ? '' : ' ± ' + fmt(s.vAscMaxErr, 1)) + ' m/s', 'estimada · error 2σ'));
+    dl.appendChild(statItem('Aceleración máx. (estimada)',
+      fmt(s.aMax, 1) + (s.aMaxErr === null ? '' : ' ± ' + fmt(s.aMaxErr, 1)) + ' m/s²', 'estimada · error 2σ'));
     dl.appendChild(statItem('Vel. de descenso prom.', fmt(s.vDescProm, 1, 'm/s'),
       s.vDescProm === null ? 'sin datos suficientes' : 'del apogeo −10 % a 10 m'));
     card.appendChild(dl);
@@ -357,6 +500,11 @@
 
   function num(v, d) { return v === null || v === undefined ? '' : v.toFixed(d); }
 
+  function derCols(d, i) {
+    var dv = d.deriv;
+    return [num(dv.v[i], 2), num(dv.a[i], 2), dv.sv[i] === null ? '' : (2 * dv.sv[i]).toFixed(2), dv.sa[i] === null ? '' : (2 * dv.sa[i]).toFixed(2)];
+  }
+
   function downloadCSV() {
     var list = visibles();
     if (!list.length) return;
@@ -365,13 +513,15 @@
       var f = list[0], d = f.data;
       lines = ['# vuelo: ' + nombre(f), '# archivo: ' + f.fileName,
         '# altitud_max_m: ' + d.stats.altMax.toFixed(2), '# tiempo_apogeo_s: ' + d.stats.tApogeo.toFixed(3),
-        'tiempo_s,altitud_m,presion_Pa,temperatura_C'];
+        '# velocidad_ms y acel_ms2: estimadas; err_vel y err_acel: error aleatorio 2σ',
+        'tiempo_s,altitud_m,presion_Pa,temperatura_C,velocidad_ms,acel_ms2,err_vel,err_acel'];
       for (var i = 0; i < d.t.length; i++) {
-        lines.push([d.t[i].toFixed(3), d.alt[i].toFixed(2), d.pres ? num(d.pres[i], 1) : '', d.temp ? num(d.temp[i], 1) : ''].join(','));
+        lines.push([d.t[i].toFixed(3), d.alt[i].toFixed(2), d.pres ? num(d.pres[i], 1) : '', d.temp ? num(d.temp[i], 1) : '']
+          .concat(derCols(d, i)).join(','));
       }
       name = 'telemetria_' + slug(nombre(f)) + '.csv';
     } else {
-      var cols = 'vuelo,tiempo_s,altitud_m,presion_Pa,temperatura_C';
+      var cols = 'vuelo,tiempo_s,altitud_m,presion_Pa,temperatura_C,velocidad_ms,acel_ms2,err_vel,err_acel';
       lines = [];
       list.forEach(function (f, k) {
         lines.push('# vuelo_' + (k + 1) + ': ' + (nombre(f) + ' (' + f.fileName + ')').replace(/[\r\n]+/g, ' '));
@@ -380,7 +530,8 @@
       list.forEach(function (f, k) {
         var d = f.data;
         for (var i = 0; i < d.t.length; i++) {
-          lines.push([k + 1, d.t[i].toFixed(3), d.alt[i].toFixed(2), d.pres ? num(d.pres[i], 1) : '', d.temp ? num(d.temp[i], 1) : ''].join(','));
+          lines.push([k + 1, d.t[i].toFixed(3), d.alt[i].toFixed(2), d.pres ? num(d.pres[i], 1) : '', d.temp ? num(d.temp[i], 1) : '']
+            .concat(derCols(d, i)).join(','));
         }
       });
       name = 'telemetria_comparacion.csv';
@@ -409,6 +560,8 @@
 
   $('link-ejemplo').addEventListener('click', loadExamples);
   chkSuperponer.addEventListener('change', drawChart);
+  chkBandas.addEventListener('change', drawDeriv);
+  detDeriv.addEventListener('toggle', drawDeriv);
   $('btn-png').addEventListener('click', downloadPNG);
   $('btn-csv').addEventListener('click', downloadCSV);
   $('btn-limpiar').addEventListener('click', function () {
